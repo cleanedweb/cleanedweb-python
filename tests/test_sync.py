@@ -303,6 +303,14 @@ def test_unusable_summary_is_flagged(cw: CleanedWeb) -> None:
     assert not cw.catalog.run(API_ID, ENDPOINT_ID).is_usable
 
 
+@respx.mock
+def test_aborted_run_is_not_usable(cw: CleanedWeb) -> None:
+    body = final_body(summary={"status": "bounded", "within_scope_passed": True})
+    body["run"] = {**body.get("run", {}), "status": "aborted", "stop_reason": "aborted"}
+    respx.post(f"{RUN_BASE}/run").mock(return_value=httpx.Response(200, json=body))
+    assert not cw.catalog.run(API_ID, ENDPOINT_ID).is_usable
+
+
 # -- errors ---------------------------------------------------------------------------------
 
 

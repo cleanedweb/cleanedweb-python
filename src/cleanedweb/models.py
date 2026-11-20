@@ -319,7 +319,8 @@ class RunResult:
 
     @property
     def is_usable(self) -> bool:
-        """``summary.status`` is ``completed`` or ``bounded`` and ``within_scope_passed`` is true.
+        """``summary.status`` is ``completed`` or ``bounded``, ``within_scope_passed`` is true and the
+        run finished (``run.status`` is ``finished``; an aborted run is never usable).
 
         A ``bounded`` or ``partial`` run can leave records uncollected: ``stop_reason`` says why.
         """
@@ -327,6 +328,7 @@ class RunResult:
             self.complete
             and self.summary.get("status") in USABLE_SUMMARY_STATUSES
             and self.summary.get("within_scope_passed") is True
+            and self.run.get("status", "finished") == "finished"
         )
 
     def __iter__(self) -> Iterator[JSON]:
