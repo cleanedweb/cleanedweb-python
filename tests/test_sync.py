@@ -28,8 +28,8 @@ from cleanedweb import (
 
 from .conftest import (
     API_ID,
+    API_ORIGIN,
     APP,
-    BROKER,
     ENDPOINT_ID,
     INDEX,
     LIVE_ITEMS,
@@ -520,8 +520,8 @@ def test_base_url_is_overridable() -> None:
 
 @respx.mock
 def test_runs_get_and_abort(cw: CleanedWeb) -> None:
-    respx.get(f"{BROKER}/v1/runs/{RUN_ID}").mock(return_value=httpx.Response(200, json=run_object()))
-    abort = respx.post(f"{BROKER}/v1/runs/{RUN_ID}/abort").mock(
+    respx.get(f"{API_ORIGIN}/v1/runs/{RUN_ID}").mock(return_value=httpx.Response(200, json=run_object()))
+    abort = respx.post(f"{API_ORIGIN}/v1/runs/{RUN_ID}/abort").mock(
         return_value=httpx.Response(202, json={**run_object(), "abort_requested": True})
     )
     run = cw.runs.get(RUN_ID)
@@ -537,7 +537,7 @@ def test_runs_items_follows_cursor_pages(cw: CleanedWeb) -> None:
         "2": {"items": [{"n": 3}], "count": 1, "next_cursor": 3, "run_status": "finished"},
         "3": {"items": [], "count": 0, "next_cursor": None, "run_status": "finished"},
     }
-    route = respx.get(f"{BROKER}/v1/runs/{RUN_ID}/items").mock(
+    route = respx.get(f"{API_ORIGIN}/v1/runs/{RUN_ID}/items").mock(
         side_effect=lambda request: httpx.Response(200, json=pages[request.url.params["cursor"]])
     )
     assert [i["n"] for i in cw.runs.items(RUN_ID, limit=2)] == [1, 2, 3]
@@ -552,7 +552,7 @@ def test_runs_items_stops_on_empty_page_unless_following(cw: CleanedWeb, sleeps:
         {"items": [{"n": 2}], "next_cursor": 2, "run_status": "running"},
         {"items": [], "next_cursor": None, "run_status": "finished"},
     ]
-    route = respx.get(f"{BROKER}/v1/runs/{RUN_ID}/items").mock(
+    route = respx.get(f"{API_ORIGIN}/v1/runs/{RUN_ID}/items").mock(
         side_effect=[httpx.Response(200, json=r) for r in responses]
     )
     assert [i["n"] for i in cw.runs.items(RUN_ID)] == [1]
@@ -563,7 +563,7 @@ def test_runs_items_stops_on_empty_page_unless_following(cw: CleanedWeb, sleeps:
 
 @respx.mock
 def test_runs_result_waits_for_the_end(cw: CleanedWeb, sleeps: List[float]) -> None:
-    respx.get(f"{BROKER}/v1/runs/{RUN_ID}/result").mock(
+    respx.get(f"{API_ORIGIN}/v1/runs/{RUN_ID}/result").mock(
         side_effect=[
             httpx.Response(202, json=run_object(), headers={"Retry-After": "5"}),
             httpx.Response(200, json=final_body()),
@@ -575,7 +575,9 @@ def test_runs_result_waits_for_the_end(cw: CleanedWeb, sleeps: List[float]) -> N
 
 @respx.mock
 def test_runs_result_wait_false_returns_the_running_run(cw: CleanedWeb) -> None:
-    respx.get(f"{BROKER}/v1/runs/{RUN_ID}/result").mock(return_value=httpx.Response(202, json=run_object()))
+    respx.get(f"{API_ORIGIN}/v1/runs/{RUN_ID}/result").mock(
+        return_value=httpx.Response(202, json=run_object())
+    )
     result = cw.runs.result(RUN_ID, wait=False)
     assert not result.complete and result.run["status"] == "running"
 
@@ -589,7 +591,7 @@ def test_runs_list_and_iter(cw: CleanedWeb) -> None:
             200, json={"runs": [{**run_object("failed"), "run_id": "b" * 32}], "next_cursor": None}
         )
 
-    route = respx.get(f"{BROKER}/v1/runs").mock(side_effect=pages)
+    route = respx.get(f"{API_ORIGIN}/v1/runs").mock(side_effect=pages)
     page = cw.runs.list(source_id="src", status="finished", limit=10)
     assert page.next_cursor == "c2" and page.runs[0].status == "finished"
     assert dict(route.calls[0].request.url.params) == {
@@ -605,10 +607,10 @@ def test_runs_list_and_iter(cw: CleanedWeb) -> None:
 
 @respx.mock
 def test_sources_run_200_and_202(cw: CleanedWeb, sleeps: List[float]) -> None:
-    post = respx.post(f"{BROKER}/v1/sources/src_1/run").mock(
+    post = respx.post(f"{API_ORIGIN}/v1/sources/src_1/run").mock(
         side_effect=[httpx.Response(200, json=final_body()), httpx.Response(202, json=run_object())]
     )
-    result_route = respx.get(f"{BROKER}/v1/runs/{RUN_ID}/result").mock(
+    result_route = respx.get(f"{API_ORIGIN}/v1/runs/{RUN_ID}/result").mock(
         return_value=httpx.Response(200, json=final_body())
     )
     first = cw.sources.run("src_1", {"q": "x"}, max_items=3, expected_version="v" * 64, idempotency_key="s-1")
@@ -626,7 +628,7 @@ def test_sources_version_selectors_are_exclusive(cw: CleanedWeb) -> None:
 
 @respx.mock
 def test_sources_version_conflict(cw: CleanedWeb) -> None:
-    respx.post(f"{BROKER}/v1/sources/src_1/run").mock(
+    respx.post(f"{API_ORIGIN}/v1/sources/src_1/run").mock(
         return_value=httpx.Response(409, json={"detail": {"code": "builder_definition_version_conflict"}})
     )
     with pytest.raises(VersionConflictError):

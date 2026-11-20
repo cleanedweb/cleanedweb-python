@@ -14,7 +14,7 @@ from ._version import __version__
 from .exceptions import CleanedWebError, error_from_response
 from .models import ApiContract, CatalogApi, EndpointContract, RunResult
 
-DEFAULT_BASE_URL = "https://broker.cleanedweb.com"
+DEFAULT_BASE_URL = "https://api.cleanedweb.com"
 DEFAULT_APP_URL = "https://app.cleanedweb.com"
 DEFAULT_SITE_URL = "https://cleanedweb.com"
 USER_AGENT = f"cleanedweb-python/{__version__}"
@@ -109,7 +109,7 @@ def raise_for_response(response: httpx.Response, *, idempotency_key: Optional[st
         if response.status_code < 400:  # a redirect means the request went to the wrong origin
             raise CleanedWebError(
                 f"HTTP {response.status_code} redirect from {response.request.url}: "
-                "nothing ran; check the base_url (runs go to https://broker.cleanedweb.com)"
+                "nothing ran; check the base_url (runs go to https://api.cleanedweb.com)"
             )
         raise error_from_response(
             response.status_code, body, dict(response.headers), idempotency_key=idempotency_key

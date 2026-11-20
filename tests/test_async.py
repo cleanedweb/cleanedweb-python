@@ -19,8 +19,8 @@ from cleanedweb import (
 
 from .conftest import (
     API_ID,
+    API_ORIGIN,
     APP,
-    BROKER,
     ENDPOINT_ID,
     INDEX,
     LIVE_ITEMS,
@@ -135,8 +135,8 @@ async def test_missing_key(monkeypatch: pytest.MonkeyPatch) -> None:
 async def test_result_get_abort_list(cw: AsyncCleanedWeb) -> None:
     respx.get(f"{RUN_BASE}/result").mock(return_value=httpx.Response(200, json=final_body()))
     assert (await cw.catalog.result(API_ID, ENDPOINT_ID, "k")).complete
-    respx.get(f"{BROKER}/v1/runs/{RUN_ID}").mock(return_value=httpx.Response(200, json=run_object()))
-    respx.post(f"{BROKER}/v1/runs/{RUN_ID}/abort").mock(
+    respx.get(f"{API_ORIGIN}/v1/runs/{RUN_ID}").mock(return_value=httpx.Response(200, json=run_object()))
+    respx.post(f"{API_ORIGIN}/v1/runs/{RUN_ID}/abort").mock(
         return_value=httpx.Response(202, json={**run_object(), "abort_requested": True})
     )
     assert (await cw.runs.get(RUN_ID)).status == "running"
@@ -147,7 +147,7 @@ async def test_result_get_abort_list(cw: AsyncCleanedWeb) -> None:
             return httpx.Response(200, json={"runs": [run_object("finished")], "next_cursor": "c2"})
         return httpx.Response(200, json={"runs": [run_object("failed")], "next_cursor": None})
 
-    respx.get(f"{BROKER}/v1/runs").mock(side_effect=pages)
+    respx.get(f"{API_ORIGIN}/v1/runs").mock(side_effect=pages)
     assert [r.status for r in [r async for r in cw.runs.iter()]] == ["finished", "failed"]
 
 
@@ -159,7 +159,7 @@ async def test_runs_items_pagination(cw: AsyncCleanedWeb, sleeps: List[float]) -
         {"items": [{"n": 3}], "next_cursor": 3},
         {"items": [], "next_cursor": None},
     ]
-    route = respx.get(f"{BROKER}/v1/runs/{RUN_ID}/items").mock(
+    route = respx.get(f"{API_ORIGIN}/v1/runs/{RUN_ID}/items").mock(
         side_effect=[httpx.Response(200, json=r) for r in responses]
     )
     assert [i["n"] for i in [i async for i in cw.runs.items(RUN_ID)]] == [1, 2]
@@ -170,14 +170,14 @@ async def test_runs_items_pagination(cw: AsyncCleanedWeb, sleeps: List[float]) -
 
 @respx.mock
 async def test_runs_result_and_sources_run(cw: AsyncCleanedWeb, sleeps: List[float]) -> None:
-    respx.get(f"{BROKER}/v1/runs/{RUN_ID}/result").mock(
+    respx.get(f"{API_ORIGIN}/v1/runs/{RUN_ID}/result").mock(
         side_effect=[
             httpx.Response(202, json=run_object(), headers={"Retry-After": "4"}),
             httpx.Response(200, json=final_body()),
         ]
     )
     assert (await cw.runs.result(RUN_ID)).complete and sleeps == [4.0]
-    respx.post(f"{BROKER}/v1/sources/src_1/run").mock(return_value=httpx.Response(200, json=final_body()))
+    respx.post(f"{API_ORIGIN}/v1/sources/src_1/run").mock(return_value=httpx.Response(200, json=final_body()))
     assert (await cw.sources.run("src_1", {"q": 1}, max_items=2)).complete
     with pytest.raises(ValueError):
         await cw.sources.run("src_1", expected_version="a", definition_version="b")
