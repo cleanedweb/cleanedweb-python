@@ -14,8 +14,6 @@ Runs are charged per record delivered.
 pip install cleanedweb          # Python 3.10+
 ```
 
-> Not on PyPI yet; until it is, use `pip install git+https://github.com/cleanedweb/cleanedweb-python`.
-
 ## Quick start
 
 Create an API key with the `run` scope in the [console](https://app.cleanedweb.com/) and export it:
