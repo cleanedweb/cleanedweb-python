@@ -11,7 +11,7 @@ Runs are charged per record delivered.
 ## Install
 
 ```bash
-pip install cleanedweb          # Python 3.9+
+pip install cleanedweb          # Python 3.10+
 ```
 
 > Not on PyPI yet while this repository is private; until then use
