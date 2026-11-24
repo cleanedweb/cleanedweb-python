@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased (0.2.0)
+## 0.2.0 - 2026-11-25
 
 - `apis`: build an API from a URL (`create`, `resume`, `get_build`, `get_draft`, `create_many`), sync and async.
   Drives the key-authorized builder routes on `app_url`: preview, inspection, create, build job, result
