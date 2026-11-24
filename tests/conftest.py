@@ -118,3 +118,62 @@ SITE_CONTRACT = {
         }
     ],
 }
+
+
+# -- building from a URL (portal builder routes) ------------------------------------------------
+
+BUILDER = f"{APP}/api/builder"
+DRAFT_ID = "draft_0123456789abcdef"
+JOB_ID = "job_0123456789abcdef"
+SOURCE_ID = "src_0123456789abcdef0123456789"
+VERSION = "e" * 64
+CAREERS_URL = "https://careers.example.org/jobs"
+
+
+def draft_body(status: Any = "running", **overrides: Any) -> Dict[str, Any]:
+    body: Dict[str, Any] = {
+        "draft_id": DRAFT_ID,
+        "state": "inspecting" if status in (None, "running", "queued", "inspecting") else "inspected",
+        "inspection": {"status": status} if status is not None else {},
+    }
+    body.update(overrides)
+    return body
+
+
+def job_body(state: str, **overrides: Any) -> Dict[str, Any]:
+    body: Dict[str, Any] = {
+        "job_id": JOB_ID,
+        "state": state,
+        "source_id": SOURCE_ID if state == "succeeded" else None,
+        "definition_version": VERSION if state == "succeeded" else None,
+        "error_code": None,
+        "progress": {"state": state, "terminal": state in ("succeeded", "failed", "cancelled")},
+    }
+    body.update(overrides)
+    return body
+
+
+RESULT_BODY = {
+    "source_id": SOURCE_ID,
+    "version": VERSION,
+    "schema": {"type": "object", "properties": {"title": {"type": "string"}, "url": {"type": "string"}}},
+}
+
+SEEK_ITEMS = [
+    {
+        "api_id": "generated_cccccccccccccccccccccccc",
+        "name": "Seek Python Jobs",
+        "short_description": "Jobs",
+        "category": "jobs",
+        "site": {"name": "Seek", "domain": "au.seek.com", "aliases": ["www.seek.com.au"]},
+        "endpoints": [],
+    },
+    {
+        "api_id": "generated_dddddddddddddddddddddddd",
+        "name": "Notseek Listings",
+        "short_description": "Other",
+        "category": "jobs",
+        "site": {"name": "Notseek", "domain": "notseek.com.au"},
+        "endpoints": [],
+    },
+]

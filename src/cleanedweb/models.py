@@ -7,13 +7,18 @@ from typing import Any, Dict, Iterator, List, Optional
 
 __all__ = [
     "ApiContract",
+    "Build",
     "CatalogApi",
     "CatalogEndpoint",
+    "Draft",
     "EndpointContract",
     "Run",
     "RunItemsPage",
     "RunList",
     "RunResult",
+    "Schedule",
+    "ScheduleDeleted",
+    "ScheduleList",
 ]
 
 JSON = Dict[str, Any]
@@ -28,6 +33,10 @@ def _dict(value: Any) -> JSON:
 
 def _list(value: Any) -> List[Any]:
     return value if isinstance(value, list) else []
+
+
+def _str_or_none(value: Any) -> Optional[str]:
+    return value if isinstance(value, str) and value else None
 
 
 @dataclass
@@ -61,6 +70,9 @@ class CatalogApi:
     category: str = ""
     site_domain: str = ""
     site_name: str = ""
+    #: Other hosts the site is known by (``site.aliases``), for example the host a customer
+    #: types. Empty when the API predates the field.
+    site_aliases: List[str] = field(default_factory=list)
     slug: Optional[str] = None
     key_fields: List[str] = field(default_factory=list)
     limitations: List[str] = field(default_factory=list)
@@ -80,6 +92,7 @@ class CatalogApi:
             category=str(data.get("category", "")),
             site_domain=str(site.get("domain", "")),
             site_name=str(site.get("name", "")),
+            site_aliases=[str(a) for a in _list(site.get("aliases")) if isinstance(a, str) and a],
             slug=data.get("slug"),
             key_fields=[str(f) for f in _list(data.get("key_fields"))],
             limitations=[str(f) for f in _list(data.get("limitations"))],
@@ -170,6 +183,10 @@ class Run:
     poll_after_seconds: Optional[float] = None
     links: Dict[str, str] = field(default_factory=dict)
     raw: JSON = field(default_factory=dict, repr=False)
+    source_id: Optional[str] = None
+    definition_version: Optional[str] = None
+    created_at: Optional[str] = None
+    finished_at: Optional[str] = None
 
     @classmethod
     def from_dict(cls, data: JSON) -> Run:
@@ -185,6 +202,10 @@ class Run:
             poll_after_seconds=float(poll) if isinstance(poll, (int, float)) else None,
             links={k: v for k, v in _dict(data.get("links")).items() if isinstance(v, str)},
             raw=data,
+            source_id=_str_or_none(data.get("source_id")),
+            definition_version=_str_or_none(data.get("definition_version")),
+            created_at=_str_or_none(data.get("created_at")),
+            finished_at=_str_or_none(data.get("finished_at")),
         )
 
     @property
@@ -256,6 +277,10 @@ class RunResult:
     sunset: Optional[str] = None
     retry_after: Optional[float] = None
     raw: JSON = field(default_factory=dict, repr=False)
+    #: With ``sources.run(..., new_only=store)``: the records not seen before (``None`` otherwise).
+    new_records: Optional[List[JSON]] = None
+    #: With ``new_only``: how many delivered records were already in the store.
+    seen_count: Optional[int] = None
 
     @classmethod
     def from_response(
@@ -336,3 +361,202 @@ class RunResult:
 
     def __len__(self) -> int:
         return len(self.records)
+
+
+#: ``Build.state`` values that end a build (``inspecting`` and ``creating`` come before a job exists).
+BUILD_TERMINAL_STATES = ("succeeded", "failed", "cancelled")
+
+
+@dataclass
+class Draft:
+    """A preview of a URL (``POST /api/builder/previews``): the page is inspected, then built."""
+
+    draft_id: str
+    state: str = ""
+    inspection: JSON = field(default_factory=dict)
+    failure: Optional[JSON] = None
+    job_id: Optional[str] = None
+    raw: JSON = field(default_factory=dict, repr=False)
+
+    @classmethod
+    def from_dict(cls, data: JSON) -> Draft:
+        failure = data.get("failure")
+        return cls(
+            draft_id=str(data.get("draft_id", "")),
+            state=str(data.get("state", "")),
+            inspection=_dict(data.get("inspection")),
+            failure=failure if isinstance(failure, dict) and failure else None,
+            job_id=_str_or_none(data.get("job_id")),
+            raw=data,
+        )
+
+    @property
+    def inspection_status(self) -> Optional[str]:
+        return _str_or_none(self.inspection.get("status"))
+
+
+@dataclass
+class Build:
+    """Where building an API from a URL stands.
+
+    ``state`` is ``inspecting`` (reading the page) or ``creating`` (waiting for the build to
+    start) before a job exists, then the job's own ``queued``, ``running``, ``succeeded``,
+    ``failed`` or ``cancelled``. ``draft_id`` and ``job_id`` are the resume handles
+    (``apis.resume``, ``apis.get_build``). On ``succeeded``, ``source_id`` is the new API: run it
+    with ``sources.run``. A build that is not terminal (``wait=False``, ``poll_timeout`` passed)
+    is continued, never started again.
+    """
+
+    draft_id: Optional[str] = None
+    job_id: Optional[str] = None
+    state: str = "inspecting"
+    source_id: Optional[str] = None
+    version: Optional[str] = None
+    schema: Optional[JSON] = None
+    error_code: Optional[str] = None
+    failure: Optional[JSON] = None
+    progress: Optional[JSON] = None
+    queue_position: Optional[int] = None
+    raw: JSON = field(default_factory=dict, repr=False)
+
+    @classmethod
+    def from_job(cls, job: JSON, *, draft_id: Optional[str] = None) -> Build:
+        failure = job.get("failure")
+        position = job.get("queue_position")
+        return cls(
+            draft_id=draft_id,
+            job_id=_str_or_none(job.get("job_id")),
+            state=str(job.get("state", "")),
+            source_id=_str_or_none(job.get("source_id")),
+            version=_str_or_none(job.get("definition_version") or job.get("version")),
+            schema=job.get("schema") if isinstance(job.get("schema"), dict) else None,
+            error_code=_str_or_none(job.get("error_code")),
+            failure=failure if isinstance(failure, dict) and failure else None,
+            progress=job.get("progress") if isinstance(job.get("progress"), dict) else None,
+            queue_position=position if isinstance(position, int) and not isinstance(position, bool) else None,
+            raw=job,
+        )
+
+    @property
+    def terminal(self) -> bool:
+        return self.state in BUILD_TERMINAL_STATES
+
+    @property
+    def succeeded(self) -> bool:
+        return self.state == "succeeded"
+
+
+@dataclass
+class Schedule:
+    """A recurring run of a catalog endpoint or one of your sources (``/v1/schedules``).
+
+    Each due slot starts an ordinary charged run, readable with ``runs`` (``last_run_id`` names
+    the latest). ``replayed`` is true when the idempotency key had already made this schedule;
+    ``idempotency_key`` is the key the create call sent.
+    """
+
+    schedule_id: str
+    name: Optional[str] = None
+    state: str = ""
+    pause_reason: Optional[str] = None
+    target: JSON = field(default_factory=dict)
+    source_id: Optional[str] = None
+    pinned_version: Optional[str] = None
+    input: JSON = field(default_factory=dict)
+    fields: Optional[List[str]] = None
+    max_items: Optional[int] = None
+    timeout_seconds: Optional[int] = None
+    cadence: JSON = field(default_factory=dict)
+    next_due_at: Optional[str] = None
+    last_slot_at: Optional[str] = None
+    last_run_id: Optional[str] = None
+    last_status: Optional[str] = None
+    consecutive_failures: int = 0
+    skipped_slots: int = 0
+    attention: List[str] = field(default_factory=list)
+    created_at: Optional[str] = None
+    inflight_run_id: Optional[str] = None
+    replayed: bool = False
+    idempotency_key: Optional[str] = None
+    raw: JSON = field(default_factory=dict, repr=False)
+
+    @classmethod
+    def from_dict(
+        cls, data: JSON, *, replayed: bool = False, idempotency_key: Optional[str] = None
+    ) -> Schedule:
+        fields = data.get("fields")
+        max_items = data.get("max_items")
+        timeout = data.get("timeout_seconds")
+        return cls(
+            schedule_id=str(data.get("schedule_id", "")),
+            name=_str_or_none(data.get("name")),
+            state=str(data.get("state", "")),
+            pause_reason=_str_or_none(data.get("pause_reason")),
+            target=_dict(data.get("target")),
+            source_id=_str_or_none(data.get("source_id")),
+            pinned_version=_str_or_none(data.get("pinned_version")),
+            input=_dict(data.get("input")),
+            fields=[str(f) for f in fields] if isinstance(fields, list) else None,
+            max_items=max_items if isinstance(max_items, int) and not isinstance(max_items, bool) else None,
+            timeout_seconds=timeout if isinstance(timeout, int) and not isinstance(timeout, bool) else None,
+            cadence=_dict(data.get("cadence")),
+            next_due_at=_str_or_none(data.get("next_due_at")),
+            last_slot_at=_str_or_none(data.get("last_slot_at")),
+            last_run_id=_str_or_none(data.get("last_run_id")),
+            last_status=_str_or_none(data.get("last_status")),
+            consecutive_failures=int(data.get("consecutive_failures") or 0),
+            skipped_slots=int(data.get("skipped_slots") or 0),
+            attention=[str(a) for a in _list(data.get("attention"))],
+            created_at=_str_or_none(data.get("created_at")),
+            inflight_run_id=_str_or_none(data.get("inflight_run_id")),
+            replayed=replayed or bool(data.get("replayed")),
+            idempotency_key=idempotency_key,
+            raw=data,
+        )
+
+    @property
+    def paused(self) -> bool:
+        return self.state == "paused"
+
+
+@dataclass
+class ScheduleList:
+    """``GET /v1/schedules``: ``limit`` is the most schedules a workspace holds."""
+
+    schedules: List[Schedule] = field(default_factory=list)
+    limit: Optional[int] = None
+    raw: JSON = field(default_factory=dict, repr=False)
+
+    @classmethod
+    def from_dict(cls, data: JSON) -> ScheduleList:
+        limit = data.get("limit")
+        return cls(
+            schedules=[Schedule.from_dict(_dict(s)) for s in _list(data.get("schedules"))],
+            limit=limit if isinstance(limit, int) and not isinstance(limit, bool) else None,
+            raw=data,
+        )
+
+    def __iter__(self) -> Iterator[Schedule]:
+        return iter(self.schedules)
+
+    def __len__(self) -> int:
+        return len(self.schedules)
+
+
+@dataclass
+class ScheduleDeleted:
+    """``DELETE /v1/schedules/{id}``: ``inflight_run_id`` is a run a ticker was already starting."""
+
+    schedule_id: str
+    deleted: bool = False
+    inflight_run_id: Optional[str] = None
+    raw: JSON = field(default_factory=dict, repr=False)
+
+    @classmethod
+    def from_dict(cls, data: JSON) -> ScheduleDeleted:
+        return cls(
+            schedule_id=str(data.get("schedule_id", "")),
+            deleted=bool(data.get("deleted")),
+            inflight_run_id=_str_or_none(data.get("inflight_run_id")),
+            raw=data,
+        )

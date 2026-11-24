@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 import uuid
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 from urllib.parse import quote
@@ -131,6 +132,15 @@ def poll_delay(retry_after: Optional[float], poll_after: Optional[float]) -> flo
     return min(MAX_POLL_SECONDS, max(MIN_POLL_SECONDS, float(value)))
 
 
+def deadline_after(timeout: Optional[float]) -> Optional[float]:
+    return None if timeout is None else time.monotonic() + timeout
+
+
+def out_of_time(deadline: Optional[float], delay: float) -> bool:
+    """True when sleeping ``delay`` more seconds would pass ``deadline`` (``None``: never)."""
+    return deadline is not None and time.monotonic() + delay > deadline
+
+
 def run_result(response: httpx.Response, body: Any, *, idempotency_key: Optional[str]) -> RunResult:
     if not isinstance(body, dict):
         raise CleanedWebError(f"HTTP {response.status_code} without a JSON object body")
@@ -143,12 +153,30 @@ def run_result(response: httpx.Response, body: Any, *, idempotency_key: Optional
 
 
 def normalize_site(value: str) -> str:
-    """``https://www.Example.com/a?b`` -> ``example.com``; a bare name stays a lowercase name."""
+    """``https://www.Example.com./a?b`` -> ``example.com``; a bare name stays a lowercase name.
+
+    Drops the scheme, credentials, port, path, query, fragment, a leading ``www.`` and a trailing dot.
+    """
     text = value.strip().lower()
     text = re.sub(r"^[a-z][a-z0-9+.\-]*://", "", text)
     text = text.split("/", 1)[0].split("?", 1)[0].split("#", 1)[0]
-    text = text.split("@")[-1].split(":", 1)[0]
+    text = text.split("@")[-1].split(":", 1)[0].strip(".")
     return text[4:] if text.startswith("www.") else text
+
+
+def _is_host(text: str) -> bool:
+    return "." in text and " " not in text
+
+
+def _same_site_host(needle: str, host: str) -> bool:
+    """``host`` is ``needle`` or a subdomain of it, or the other way round (a page of the site)."""
+    return needle == host or host.endswith("." + needle) or needle.endswith("." + host)
+
+
+def _names_host(needle: str, text: str) -> bool:
+    """``needle`` appears in a free-text name delimited as a host, so ``seek.com.au`` is not found
+    inside ``notseek.com.au``."""
+    return re.search(rf"(?<![a-z0-9.\-]){re.escape(needle)}(?![a-z0-9\-])", text) is not None
 
 
 def merge_index(apis: List[CatalogApi], index: Iterable[Dict[str, Any]]) -> List[CatalogApi]:
@@ -163,17 +191,29 @@ def merge_index(apis: List[CatalogApi], index: Iterable[Dict[str, Any]]) -> List
 
 
 def matches_site(api: CatalogApi, site: str) -> bool:
+    """Does ``api`` belong to ``site`` (a domain, a full URL, a name or a part of one)?
+
+    A host-shaped ``site`` (it has a dot) matches the API's domain and every ``site.aliases`` host
+    on label boundaries: equal, or one a subdomain of the other. ``seek.com.au`` finds an API whose
+    domain is ``au.seek.com`` when ``www.seek.com.au`` is an alias, and never ``notseek.com.au``.
+    The site name and the API name match as a host only on boundaries too. A name without a dot
+    (``github``) is a substring of the domain, an alias, the site name or the API name.
+    """
     needle = normalize_site(site)
     if not needle:
         return True
-    domain = normalize_site(api.site_domain)
-    haystack = (domain, api.site_name.lower(), api.name.lower())
-    return any(needle in h for h in haystack if h)
+    hosts = [h for h in (normalize_site(x) for x in (api.site_domain, *api.site_aliases)) if h]
+    names = [t for t in (api.site_name.lower(), api.name.lower()) if t]
+    if _is_host(needle):
+        return any(_same_site_host(needle, h) for h in hosts) or any(_names_host(needle, t) for t in names)
+    return any(needle in t for t in (*hosts, *names))
 
 
 def matches_text(api: CatalogApi, q: str) -> bool:
     words = [w for w in re.split(r"\s+", q.lower().strip()) if w]
-    text = " ".join([api.name, api.description, api.site_domain, api.site_name, *api.key_fields]).lower()
+    text = " ".join(
+        [api.name, api.description, api.site_domain, *api.site_aliases, api.site_name, *api.key_fields]
+    ).lower()
     return all(w in text for w in words)
 
 

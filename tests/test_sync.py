@@ -35,6 +35,7 @@ from .conftest import (
     LIVE_ITEMS,
     RUN_BASE,
     RUN_ID,
+    SEEK_ITEMS,
     SITE,
     SITE_CONTRACT,
     final_body,
@@ -146,6 +147,55 @@ def test_find_filters_site_and_fields_with_deep_contract_check() -> None:
         assert [a.api_id for a in client.catalog.find(site="blocket")] == [
             "generated_bbbbbbbbbbbbbbbbbbbbbbbb"
         ]
+
+
+@respx.mock
+@pytest.mark.parametrize(
+    "site",
+    [
+        "seek.com.au",
+        "www.seek.com.au",
+        "https://www.seek.com.au/jobs",
+        "HTTPS://WWW.SEEK.COM.AU./jobs?q=1",
+        "au.seek.com",
+        "seek.com",
+    ],
+)
+def test_find_matches_a_site_by_its_alias_host(site: str) -> None:
+    respx.get(f"{APP}/api/catalog/apis").mock(return_value=httpx.Response(200, json={"items": SEEK_ITEMS}))
+    respx.get(f"{SITE}/catalog/index.json").mock(return_value=httpx.Response(200, json={"apis": []}))
+    with CleanedWeb() as client:
+        found = client.catalog.find(site=site)
+    assert [a.site_domain for a in found] == ["au.seek.com"]
+    assert found[0].site_aliases == ["www.seek.com.au"]
+
+
+@respx.mock
+def test_find_does_not_match_look_alike_hosts() -> None:
+    respx.get(f"{APP}/api/catalog/apis").mock(return_value=httpx.Response(200, json={"items": SEEK_ITEMS}))
+    respx.get(f"{SITE}/catalog/index.json").mock(return_value=httpx.Response(200, json={"apis": []}))
+    with CleanedWeb() as client:
+        assert [a.site_domain for a in client.catalog.find(site="notseek.com.au")] == ["notseek.com.au"]
+        assert [a.site_domain for a in client.catalog.find(site="seek.com.au")] == ["au.seek.com"]
+        assert client.catalog.find(site="seek.com.au.evil.example") == []
+        assert client.catalog.find(site="eek.com.au") == []
+
+
+@respx.mock
+def test_find_tolerates_responses_without_aliases_or_with_odd_ones() -> None:
+    items = [
+        {**LIVE_ITEMS[0], "site": {"name": "GitHub", "domain": "github.com", "aliases": None}},
+        {
+            **LIVE_ITEMS[1],
+            "site": {"name": "Blocket", "domain": "www.blocket.se", "aliases": [3, "", "blocket.example"]},
+        },
+    ]
+    respx.get(f"{APP}/api/catalog/apis").mock(return_value=httpx.Response(200, json={"items": items}))
+    respx.get(f"{SITE}/catalog/index.json").mock(return_value=httpx.Response(200, json={"apis": []}))
+    with CleanedWeb() as client:
+        assert [a.site_domain for a in client.catalog.find(site="github.com")] == ["github.com"]
+        assert [a.site_domain for a in client.catalog.find(site="blocket.example")] == ["www.blocket.se"]
+        assert client.catalog.find(site="github.com")[0].site_aliases == []
 
 
 @respx.mock

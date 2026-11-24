@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import os
 import time
-from typing import Any, Dict, Iterable, Iterator, List, Optional
+from typing import Any, Dict, Iterable, Iterator, List, Optional, Tuple, Union
 
 import httpx
 
 from . import _core as core
+from ._apis_sync import Apis
+from ._schedules_sync import Schedules
 from .exceptions import (
     APIConnectionError,
     APIStatusError,
@@ -24,6 +26,7 @@ from .models import (
     RunList,
     RunResult,
 )
+from .seen import SeenStore, identity_paths_from_contract
 
 __all__ = ["CleanedWeb"]
 
@@ -32,8 +35,10 @@ class CleanedWeb:
     """Client for the CleanedWeb catalog and run APIs.
 
     ``api_key`` defaults to ``CLEANEDWEB_API_KEY``. Reading the catalog (``catalog.list``,
-    ``get``, ``find``) needs no key; running does (scope ``run``). The key is only ever sent to
-    ``base_url``, never to the catalog read origins.
+    ``get``, ``find``) needs no key; running and schedules do (scope ``run``; ``schedules.list`` and
+    ``get`` need ``read``). Building an API from a URL (``apis``) needs a key with the creation
+    scopes ``discover`` and ``build``. The key is only ever sent to ``base_url`` (runs, schedules)
+    and, for ``apis``, to ``app_url``; never to the catalog read origins.
     """
 
     def __init__(
@@ -60,9 +65,12 @@ class CleanedWeb:
         self._owns_http = http_client is None
         self._http = http_client or httpx.Client(timeout=timeout, follow_redirects=False)
         self._index_cache: Optional[List[Dict[str, Any]]] = None
+        self._identity_cache: Dict[Tuple[str, str], Tuple[str, ...]] = {}
         self.catalog = Catalog(self)
         self.runs = Runs(self)
         self.sources = Sources(self)
+        self.apis = Apis(self)
+        self.schedules = Schedules(self)
 
     def __repr__(self) -> str:
         return f"CleanedWeb(base_url={self.base_url!r}, api_key={'set' if self._api_key else 'unset'})"
@@ -84,7 +92,8 @@ class CleanedWeb:
         if auth:
             if not self._api_key:
                 raise MissingAPIKeyError(
-                    "This call needs an API key with the `run` scope: pass api_key= or set CLEANEDWEB_API_KEY"
+                    "This call needs an API key (scope `run`; building APIs needs `discover` and `build`): "
+                    "pass api_key= or set CLEANEDWEB_API_KEY"
                 )
             headers["Authorization"] = f"Bearer {self._api_key}"
         if idempotency_key is not None:
@@ -476,6 +485,8 @@ class Sources:
         nulls: Optional[bool] = None,
         poll_timeout: Optional[float] = None,
         base_url: Optional[str] = None,
+        new_only: Union[SeenStore, str, os.PathLike[str], None] = None,
+        mark_seen: bool = True,
     ) -> RunResult:
         """Run one of your own private APIs (``POST /v1/sources/{source_id}/run``).
 
@@ -484,7 +495,15 @@ class Sources:
         version) makes the call fail with ``VersionConflictError`` if the active definition
         changed; it cannot be combined with ``definition_version``. ``base_url`` overrides the
         origin your API's connection details name.
+
+        ``new_only`` (a :class:`~cleanedweb.seen.SeenStore` or a path for one) keeps the records
+        you have not seen before in ``result.new_records`` (``result.seen_count`` counts the rest);
+        they are marked seen unless ``mark_seen=False`` (then call ``result.new_records.commit()``
+        once handled). ``result.records`` still holds everything the run delivered, and the run is
+        charged for all of it. It needs ``wait=True`` and a finished result.
         """
+        if new_only is not None and not wait:
+            raise ValueError("new_only needs wait=True: the records are read from the finished run")
         if expected_version is not None and definition_version is not None:
             raise ValueError("pass expected_version or definition_version, not both")
         key = (
@@ -515,7 +534,11 @@ class Sources:
         )
         result = core.run_result(response, payload, idempotency_key=key)
         if result.complete or not wait:
-            return result
+            return (
+                self._only_new(result, source_id, new_only, mark_seen, origin)
+                if new_only is not None
+                else result
+            )
         run_id = result.run_id
         if not run_id:
             raise CleanedWebError("the 202 answer carried no run_id to read the result with")
@@ -524,4 +547,46 @@ class Sources:
             resp, data = self._c._send("GET", f"{origin}/v1/runs/{core.seg(run_id)}/result", auth=True)
             return core.run_result(resp, data, idempotency_key=key)
 
-        return self._c._poll(result, fetch, poll_timeout)
+        result = self._c._poll(result, fetch, poll_timeout)
+        return (
+            self._only_new(result, source_id, new_only, mark_seen, origin) if new_only is not None else result
+        )
+
+    def _only_new(
+        self,
+        result: RunResult,
+        source_id: str,
+        new_only: Union[SeenStore, str, os.PathLike[str]],
+        mark_seen: bool,
+        origin: str,
+    ) -> RunResult:
+        if not result.complete:
+            return result
+        store = new_only if isinstance(new_only, SeenStore) else SeenStore(new_only)
+        paths = self.identity_paths(source_id, result.metadata.get("definition_version"), base_url=origin)
+        fresh = store.filter_new(source_id, result.records, paths, mark=mark_seen)
+        result.new_records = fresh
+        result.seen_count = fresh.seen_count
+        return result
+
+    def identity_paths(
+        self, source_id: str, version: Optional[str], *, base_url: Optional[str] = None
+    ) -> Tuple[str, ...]:
+        """The record identity paths the version's contract declares, or ``()`` (no ``read``
+        scope, unknown version, or none declared). Cached per client."""
+        if not isinstance(version, str) or not version:
+            return ()
+        cached = self._c._identity_cache.get((source_id, version))
+        if cached is not None:
+            return cached
+        origin = (base_url or self._c.base_url).rstrip("/")
+        url = f"{origin}/v1/sources/{core.seg(source_id)}/versions/{core.seg(version)}/contract"
+        try:
+            contract = self._c._get_json(url, auth=True)
+        except APIStatusError as exc:
+            if exc.status_code in (403, 404, 409, 422):  # a 5xx must not silently change the keys
+                return ()
+            raise
+        paths = identity_paths_from_contract(contract)
+        self._c._identity_cache[(source_id, version)] = paths
+        return paths

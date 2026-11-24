@@ -26,6 +26,7 @@ from .conftest import (
     LIVE_ITEMS,
     RUN_BASE,
     RUN_ID,
+    SEEK_ITEMS,
     SITE,
     SITE_CONTRACT,
     final_body,
@@ -181,3 +182,12 @@ async def test_runs_result_and_sources_run(cw: AsyncCleanedWeb, sleeps: List[flo
     assert (await cw.sources.run("src_1", {"q": 1}, max_items=2)).complete
     with pytest.raises(ValueError):
         await cw.sources.run("src_1", expected_version="a", definition_version="b")
+
+
+@respx.mock
+async def test_find_matches_a_site_by_its_alias_host(cw: AsyncCleanedWeb) -> None:
+    respx.get(f"{APP}/api/catalog/apis").mock(return_value=httpx.Response(200, json={"items": SEEK_ITEMS}))
+    respx.get(f"{SITE}/catalog/index.json").mock(return_value=httpx.Response(200, json={"apis": []}))
+    for site in ("seek.com.au", "www.seek.com.au", "https://www.seek.com.au/jobs"):
+        assert [a.site_domain for a in await cw.catalog.find(site=site)] == ["au.seek.com"]
+    assert [a.site_domain for a in await cw.catalog.find(site="notseek.com.au")] == ["notseek.com.au"]
