@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.0 - unreleased
+## 0.1.0 - 2026-11-20
 
 - First version: sync `CleanedWeb` and async `AsyncCleanedWeb` clients for the public catalog
   (`list`, `get`, `find`, `run`, `result`), runs (`get`, `items`, `result`, `abort`, `list`) and
