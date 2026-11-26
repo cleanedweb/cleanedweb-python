@@ -1,4 +1,8 @@
+<p align="center"><img src="https://cleanedweb.com/assets/logo.png" width="72" alt="CleanedWeb"></p>
+
 # cleanedweb
+
+[![PyPI](https://img.shields.io/pypi/v/cleanedweb)](https://pypi.org/project/cleanedweb/) [![Python](https://img.shields.io/pypi/pyversions/cleanedweb)](https://pypi.org/project/cleanedweb/) [![CI](https://github.com/cleanedweb/cleanedweb-python/actions/workflows/ci.yml/badge.svg)](https://github.com/cleanedweb/cleanedweb-python/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](https://github.com/cleanedweb/cleanedweb-python/blob/main/LICENSE)
 
 Python client for [CleanedWeb](https://cleanedweb.com/?utm_source=github&utm_medium=cleanedweb-python),
 which turns public website collections (listings, products, jobs, articles, profiles) into maintained
