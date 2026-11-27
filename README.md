@@ -4,9 +4,20 @@
 
 [![PyPI](https://img.shields.io/pypi/v/cleanedweb)](https://pypi.org/project/cleanedweb/) [![Python](https://img.shields.io/pypi/pyversions/cleanedweb)](https://pypi.org/project/cleanedweb/) [![CI](https://github.com/cleanedweb/cleanedweb-python/actions/workflows/ci.yml/badge.svg)](https://github.com/cleanedweb/cleanedweb-python/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](https://github.com/cleanedweb/cleanedweb-python/blob/main/LICENSE)
 
-Python client for [CleanedWeb](https://cleanedweb.com/?utm_source=github&utm_medium=cleanedweb-python),
-which turns public website collections (listings, products, jobs, articles, profiles) into maintained
-REST APIs that return structured records. Sync and async clients, typed errors, one dependency (`httpx`).
+<p align="center"><img src="https://raw.githubusercontent.com/cleanedweb/cleanedweb-python/main/docs/demo.gif" width="760" alt="Terminal: a short Python script finds the Steam Most Played Games API and prints five live records"></p>
+<p align="center"><sub>A live run: the five most played Steam games right now, as five records.</sub></p>
+
+**Scrapers break whenever a site changes its pages.** CleanedWeb is a catalog of maintained REST APIs
+for public websites (listings, products, jobs, articles, profiles): you call an API and get structured
+records with known fields. When a site changes, CleanedWeb rebuilds its API.
+This is the Python client for [CleanedWeb](https://cleanedweb.com/?utm_source=github&utm_medium=cleanedweb-python).
+
+- Find an API for a site in the public catalog, read its contract, run it: `find`, `get`, `run`.
+- Sync and async clients (`CleanedWeb`, `AsyncCleanedWeb`).
+- Handles the parts that are easy to get wrong: the idempotency key, runs that outlive one request,
+  and recovery after a lost response.
+- Typed errors for credit, rate limits and failed runs.
+- One dependency (`httpx`). Python 3.10 or later.
 
 **Pricing:** 5,000 records free once, then prepaid credit from $1 per 1,000 records, no subscription.
 Runs are charged per record delivered.
